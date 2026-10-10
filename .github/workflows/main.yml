@@ -1,0 +1,409 @@
+name: Publish Archive
+run-name: Publish archive📦 as developping pre-release version
+on:
+  repository_dispatch:
+    types: [called-other-workflow]
+jobs:
+  Create-Release-GitHub-Actions:
+    runs-on: ubuntu-latest
+    permissions: write-all
+    steps:
+      # Add Secrets to Mask
+      - name: Add Mask
+        run: echo "::add-mask::${{ secrets.GITHUB_TOKEN }}"
+      - name: Add Mask
+        run: echo "::add-mask::${{ secrets.GH_PAT }}"
+      - name: Add Mask
+        run: echo "::add-mask::${{ secrets.OWNER_MAIL_ADDRESS }}"
+      - name: Add Mask
+        run: echo "::add-mask::${{ secrets.ARCHIVE_PASSWORD }}"
+      - name: Add Mask
+        run: echo "::add-mask::${{ secrets.CACHE_SERVER }}"
+
+      # Add Secret Data to Step Output
+      - name: Set OwnerMailAddress
+        id: OwnerMailAddress
+        run: echo "Address=${OWNER_MAIL_ADDRESS}" >> $GITHUB_OUTPUT
+        env:
+          OWNER_MAIL_ADDRESS: ${{ secrets.OWNER_MAIL_ADDRESS }}
+      - name: Set OwnerName
+        id: OwnerName
+        run: echo "Name=${OWNER_NAME}" >> $GITHUB_OUTPUT
+        env:
+          OWNER_NAME: ${{ secrets.OWNER_NAME }}
+
+      # Get RepoName only ("owner/reponame" => "reponame")
+      - name: Get Repository Name only
+        id: Repository
+        run: echo "Name=${GITHUB_REPOSITORY#${GITHUB_REPOSITORY_OWNER}/}" >> $GITHUB_OUTPUT
+
+      # Prepare 7-Zip to Make Archive
+      - name: Download 7-Zip for Linux Archive
+        shell: bash
+        working-directory: ${{ runner.temp }}
+        run: aria2c -x 16 "https://github.com/p7zip-project/p7zip/releases/download/v17.05/linux-p7zip.7z"
+
+      - name: Extract 7-Zip for Linux Archive
+        shell: bash
+        working-directory: ${{ runner.temp }}
+        run: 7z x "linux-p7zip.7z" -op7zip
+
+      - name: Install 7-Zip for Linux
+        shell: bash
+        run: sudo mv $RUNNER_TEMP/p7zip/* /opt/
+
+      - name: Clean up 7-Zip for Linux Setup Files
+        shell: bash
+        working-directory: ${{ runner.temp }}
+        run: rm -r p7zip linux-p7zip.7z
+
+      - name: Download 7-Zip for Windows Archive
+        run: |
+          mkdir -p $RUNNER_TEMP/7zstd
+          curl https://github.com/mcmilk/7-Zip-zstd/releases/download/v26.02-v1.5.7-R2/7z26.02-zstd-x64.exe -L -sS -o $RUNNER_TEMP/7zstd/7z26.02-zstd-x64.exe
+
+      - name: Extract 7-Zip for Windows Archive
+        run: |
+          /opt/7z x $RUNNER_TEMP/7zstd/7z26.02-zstd-x64.exe -o$RUNNER_TEMP/7zstd
+
+      # Check out repository code
+      - name: Check out self repository
+        uses: actions/checkout@v7
+        with:
+          path: init-dev-env-act
+          show-progress: false
+
+      - name: Change Branch to develop
+        run: |
+          cd $GITHUB_WORKSPACE/${{ secrets.ACTION_EXEC_REPO_NAME }}
+          git config user.name actions-user
+          git config user.email action@github.com
+          git pull --all
+
+      - name: Check directory and files after check out self repository
+        run: |
+          echo ls -al $GITHUB_WORKSPACE
+          ls -al $GITHUB_WORKSPACE
+
+      - name: Check out neighboring repository
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ github.repository_owner }}/init-dev-env-secret
+          token: ${{ secrets.GH_PAT }}
+          ref: ${{ vars.DEVELOP_BRANCH_NAME }}
+          path: init-dev-env
+          show-progress: false
+
+      - name: Check directory and files after check out neighboring repository
+        run: |
+          echo ls -al $GITHUB_WORKSPACE
+          ls -al $GITHUB_WORKSPACE
+          echo ls -al $GITHUB_WORKSPACE/..
+          ls -al $GITHUB_WORKSPACE/..
+          echo ls -al $GITHUB_WORKSPACE/../..
+          ls -al $GITHUB_WORKSPACE/../..
+
+      - name: Copy 7-Zip Command
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/init-dev-env/Lib
+          cp $RUNNER_TEMP/7zstd/7z.exe $GITHUB_WORKSPACE/init-dev-env/Lib/
+          cp $RUNNER_TEMP/7zstd/7z.dll $GITHUB_WORKSPACE/init-dev-env/Lib/
+          cp $RUNNER_TEMP/7zstd/License.txt $GITHUB_WORKSPACE/init-dev-env/Lib/License_7z.txt
+
+      - name: Make Cache File Directory
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/init-dev-env/Files
+
+      - name: Copy JSON Library
+        run: |
+          curl -sS -L -O https://github.com/JamesNK/Newtonsoft.Json/releases/download/13.0.3/Json130r3.zip
+          unzip -q Json130r3.zip -d Json130r3/
+          mv ./Json130r3/Bin/net45/Newtonsoft.Json.dll $GITHUB_WORKSPACE/init-dev-env/Lib/
+          mv ./Json130r3/license.txt $GITHUB_WORKSPACE/init-dev-env/Lib/License_Newtonsoft.Json.txt
+
+      - name: Download caches
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ProgressPreference = "SilentlyContinue"
+          # ダウンロード対象情報を定義
+          $DownloadItemInfoList = @(
+              @{
+                  DirName = 'ScreenBlack'
+                    FileName = 'ScreenBlack.7z'
+                    URL = 'https://takasi.tech/filez/ScreenBlack/$FileName'
+                }
+                @{
+                    DirName = 'TaskList'
+                  FileName = 'tskls234.zip'
+                  URL = 'https://takasi.tech/filez/TaskList/$FileName'
+              }
+              @{
+                  DirName = 'Clibor'
+                  FileName = 'cmigemo-default-win32-20110227.zip'
+                  URL = 'https://files.kaoriya.net/cmigemo/$FileName'
+              }
+              @{
+                  DirName = 'HotkeyP'
+                  FileName = 'hotkeyp_64bit.zip'
+                  # URL = 'https://sf-west-interserver-2.dl.sourceforge.net/project/hotkeyp/$FileName'
+                  URL = 'https://takasi.tech/filez/HotkeyP/$FileName'
+              }
+              @{
+                  DirName = 'copipa'
+                  FileName = 'copipa110.zip'
+                  URL = 'https://takasi.tech/filez/copipa/$FileName'
+              }
+              @{
+                  DirName = 'MassiGra'
+                  FileName = 'MassiGra045.zip'
+                  URL = 'https://ftp.vector.co.jp/60/45/1855/$FileName'
+              }
+              @{
+                  DirName = 'DisplayOff'
+                  FileName = 'display-off.zip'
+                  URL = 'https://ftp.vector.co.jp/77/15/3986/$FileName'
+              }
+              @{
+                  DirName = 'DontSleep'
+                  FileName = 'DontSleep_x64_Portable.zip'
+                  URL = 'https://www.softwareok.eu/Download/$FileName'
+              }
+              @{
+                  DirName = 'Mery'
+                  FileName = 'MeryPortable-x64-3.8.9.zip'
+                  URL = 'https://www.haijin-boys.com/download/$FileName'
+              }
+              @{
+                  DirName = 'TreeSize'
+                  FileName = 'TreeSizeFree-Portable.zip'
+                  URL = 'https://downloads.jam-software.de/treesize_free/$FileName'
+              }
+              @{
+                  DirName = 'DiskInfo'
+                  FileName = 'diskinfo643.3.7.0.zip'
+                  URL = 'https://dforest.watch.impress.co.jp/library/d/diskinfo/11197/$FileName'
+              }
+          )
+          # カレントディレクトリを移動
+          Set-Location init-dev-env/Files
+          # 各ダウンロード対象情報ごとにループ
+          foreach ($DownloadItem in $DownloadItemInfoList) {
+              # ダウンロード対象情報から変数に展開
+              $DirName = $DownloadItem.DirName
+              $FileName = $DownloadItem.FileName
+              $URL = $DownloadItem.URL.Replace("`$FileName", "$FileName")
+              "$DirName/$FileName, $URL"
+              # ディレクトリを作成
+              New-Item -ItemType Directory $DirName -Force -ErrorAction SilentlyContinue | Out-Null
+              # 資材をダウンロード
+              Invoke-WebRequest -Uri $URL -OutFile "$DirName/$FileName" -UseBasicParsing
+              # Last-Modifiedヘッダーが返ってきたなら取得
+              $LastModified = ((Invoke-WebRequest -Method Head $URL -UseBasicParsing).Headers | ForEach-Object { $Header = $_; $Header.Keys | Where-Object { $HeaderName = $_; $HeaderName -eq "Last-Modified" } | ForEach-Object { $Header[$HeaderName] } })
+              # Last-Modifiedが取得できたらその値で、取得できなかったら2025年1月1日9時0分0秒でファイルの更新日時を設定
+              if ($LastModified) {
+                  (Get-Item "$DirName/$FileName").LastWriteTime = [DateTime]$LastModified
+              } else {
+                  (Get-Item "$DirName/$FileName").LastWriteTime = [DateTime]"2025-01-01 09:00:00"
+              }
+              # 結果を出力
+              Get-Item "$DirName/$FileName" | ForEach-Object { "{0}/{1},`t{2:#,##0},`t{3:yyyy-MM-dd ddd HH:mm:ss.fff}" -f $DirName, $_.Name, $_.Length, $_.LastWriteTime }
+          }
+
+      - name: Check directory and files before release
+        run: |
+          echo ls -alR $GITHUB_WORKSPACE/init-dev-env
+          ls -alR $GITHUB_WORKSPACE/init-dev-env
+
+      - name: Make Archive of init-dev-env repository
+        run: |
+          cd "$GITHUB_WORKSPACE/init-dev-env"
+          /opt/7z a "$GITHUB_WORKSPACE/init-dev-env.7z" -t7z -m0=lizard -mx49 -p${{ secrets.ARCHIVE_PASSWORD }} -mhe=on "*.*" -R -x!".git" -x!".github" -x!".gitignore" -x!"README.md" -x!"LICENSE"
+
+      - name: Create Release
+        run: |
+          cd $GITHUB_WORKSPACE/${{ secrets.ACTION_EXEC_REPO_NAME }}
+          gh release create ${{ vars.DEVELOP_BRANCH_NAME }} -R ${{ github.repository_owner }}/init-dev-env --title "In Development (Draft)" --notes "In development. (Draft)" --prerelease --latest=false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+
+      - name: Upload Release Asset
+        run: |
+          cd $GITHUB_WORKSPACE/${{ secrets.ACTION_EXEC_REPO_NAME }}
+          gh release upload ${{ vars.DEVELOP_BRANCH_NAME }} "${{ github.workspace }}/init-dev-env.7z" --clobber -R ${{ github.repository_owner }}/init-dev-env
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+
+      - name: Add 7-Zip Command to develop branch
+        run: |
+          cd $GITHUB_WORKSPACE/${{ secrets.ACTION_EXEC_REPO_NAME }}
+          mkdir -p lib
+          cp ../init-dev-env/Lib/7z.exe lib/
+          cp ../init-dev-env/Lib/7z.dll lib/
+          cp ../init-dev-env/Lib/License_7z.txt lib/
+
+      - name: Add Doc File of Enchanted Chant with PowerShell
+        shell: pwsh
+        run: |
+          Set-Location "${{ github.workspace }}/${{ secrets.ACTION_EXEC_REPO_NAME }}"
+          New-Item -ItemType Directory doc -Force -ErrorAction SilentlyContinue | Out-Null
+          $Lines = [System.Collections.Generic.List[String]]::New()
+          $Lines.Add('# Enchanted Chant')
+          $Lines.Add('')
+          $Lines.Add('```PowerShell')
+          $Lines.Add('$ErrorActionPreference = "Stop"')
+          $Lines.Add('$ProgressPreference = "SilentlyContinue"')
+          $Lines.Add('$InstallDirPath = "C:\TempInstall\InstallScript"')
+          $Lines.Add('$SevenZipExeFilePath = "$InstallDirPath\Lib\7z.exe"')
+          $Lines.Add('$SevenZipDllFilePath = "$InstallDirPath\Lib\7z.dll"')
+          $Lines.Add('$ArtifactArchiveFilePath = "$InstallDirPath\init-dev-env.7z"')
+          $Lines.Add('$Pswd = Read-Host -Prompt "Key?"')
+          $Lines.Add('New-Item -ItemType Directory -Path "$InstallDirPath\Lib" -Force -ErrorAction SilentlyContinue | Out-Null')
+          $Lines.Add('Invoke-WebRequest -Uri https://raw.githubusercontent.com/init-dev-env/init-dev-env-act/refs/heads/${{ vars.DEVELOP_BRANCH_NAME }}/lib/7z.exe -OutFile "$SevenZipExeFilePath" -ErrorAction Stop | Out-Null')
+          $Lines.Add('Invoke-WebRequest -Uri https://raw.githubusercontent.com/init-dev-env/init-dev-env-act/refs/heads/${{ vars.DEVELOP_BRANCH_NAME }}/lib/7z.dll -OutFile "$SevenZipDllFilePath" -ErrorAction Stop | Out-Null')
+          $Lines.Add('Unblock-File "$SevenZipExeFilePath" | Out-Null')
+          $Lines.Add('Unblock-File "$SevenZipDllFilePath" | Out-Null')
+          $Lines.Add('Invoke-WebRequest https://github.com/init-dev-env/init-dev-env/releases/download/${{ vars.DEVELOP_BRANCH_NAME }}/init-dev-env.7z -OutFile "$ArtifactArchiveFilePath" -ErrorAction Stop | Out-Null')
+          $Lines.Add('Unblock-File "$ArtifactArchiveFilePath" | Out-Null')
+          $Lines.Add('Start-Process "$SevenZipExeFilePath" -ArgumentList "x `"$ArtifactArchiveFilePath`" -o`"$InstallDirPath`" -p$Pswd -x!Lib\7z.exe -x!Lib\7z.dll -y -sccWIN -scsUTF-8 -bso0 -bsp0 -bd" -Wait -NoNewWindow | Out-Null')
+          $Lines.Add('Start-Process "C:\Windows\Explorer.exe" -ArgumentList "$InstallDirPath"')
+          $Lines.Add('')
+          $Lines.Add('```')
+          $Lines.Add('')
+          $Lines | Out-File -FilePath doc/intro.md
+
+      - name: Commit and Push to develop branch
+        run: |
+          cd $GITHUB_WORKSPACE/${{ secrets.ACTION_EXEC_REPO_NAME }}
+          git checkout -B ${{ vars.DEVELOP_BRANCH_NAME }}
+          git add .
+          git commit -m "Add Enchanted Chant for develop"
+          git push -u origin ${{ vars.DEVELOP_BRANCH_NAME }}
+
+      - name: Download caches
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ProgressPreference = "SilentlyContinue"
+          # カレントディレクトリを移動
+          $RepoTempDirPath = "${{ github.workspace }}/${{ secrets.ACTION_EXEC_REPO_NAME }}/Temp1"
+          New-Item -ItemType Directory $RepoTempDirPath -Force -ErrorAction SilentlyContinue | Out-Null
+          Set-Location $RepoTempDirPath
+          # 資材をダウンロード
+          $TargetInfoList = @(
+              @{
+                  DirName = 'P4Merge'
+                  URL = 'https://filehost.perforce.com/perforce/r25.1/bin.ntx64/p4vinst64.exe'
+                  FileName = '{{FromURLTail}}'
+              }
+          )
+          # 各ダウンロード対象情報ごとにループ
+          foreach ($TargetInfo in $TargetInfoList) {
+              # ダウンロード対象情報から変数に展開
+              $DirName = $TargetInfo.DirName
+              $FileName = $TargetInfo.FileName
+              $URL = $TargetInfo.URL
+              if ($FileName -eq '{{FromURLTail}}') {
+                  $FileName = $URL.Split('/')[-1]
+              }
+              # ディレクトリを作成
+              New-Item -ItemType Directory $DirName -Force -ErrorAction SilentlyContinue | Out-Null
+              # メタ情報を取得
+              $HeadResponse = Invoke-WebRequest -Method Head $URL -UseBasicParsing
+              if ($HeadResponse.StatusCode -ne 200) {
+                  # ステータスコードが200以外ならエラー
+                  Write-Host "Error: URL $URL returned status code $($HeadResponse.StatusCode) $($HeadResponse.StatusDescription)"
+                  continue
+              }
+              # Last-Modifiedヘッダーが返ってきたなら取得
+              if (-not $HeadResponse.Headers.ContainsKey("Last-Modified")) {
+                  $LastModified = [DateTime]"2025-01-01 09:00:00"
+                  $LastModifiedStr = "???"
+              } else {
+                $LastModified = $HeadResponse.Headers["Last-Modified"]
+                if ($LastModified -is [String[]]) {
+                    Write-Host "WARN: Last-Modified Headers are many. ($($LastModified.Count))"
+                    foreach ($LastModified1 in $LastModified) {
+                        Write-Host "WARN: Last-Modified: $LastModified1"
+                    }
+                    $LastModified = [DateTime]($LastModified[0])
+                    $LastModifiedStr = $LastModified.ToString("yyyy-MM-dd ddd HH:mm:ss.fff")
+                } elseif (-not ($LastModified -is [String])) {
+                    Write-Host "WARN: Last-Modified is not String. [$($LastModified.GetType().ToString())]"
+                    $LastModified = [DateTime]"2025-01-01 09:00:00"
+                    $LastModifiedStr = "???"
+                } elseif ([String]::IsNullOrEmpty($LastModified)) {
+                    Write-Host "WARN: Last-Modified is not String. [$($LastModified.GetType().ToString())]"
+                    $LastModified = [DateTime]"2025-01-01 09:00:00"
+                    $LastModifiedStr = "???"
+                } else {
+                    $LastModified = [DateTime]$LastModified
+                    $LastModifiedStr = $LastModified.ToString("yyyy-MM-dd ddd HH:mm:ss.fff")
+                }
+              }
+              # Content-Lengthヘッダーが返ってきたなら取得
+              if (-not $HeadResponse.Headers.ContainsKey("Content-Length")) {
+                  $ContentLength = "???"
+              } else {
+                  $ContentLength = $HeadResponse.Headers["Content-Length"]
+                  if ($ContentLength -is [String[]]) {
+                      Write-Host "WARN: Content-Length Headers are many. ($($ContentLength.Count))"
+                      foreach ($ContentLength1 in $ContentLength) {
+                          Write-Host "WARN: Content-Length: $ContentLength1"
+                      }
+                      $ContentLength = [String]($ContentLength[0])
+                  } elseif (-not ($ContentLength -is [String])) {
+                      Write-Host "WARN: Content-Length is not String. [$($ContentLength.GetType().ToString())]"
+                      $ContentLength = "???"
+                  } elseif ([String]::IsNullOrEmpty($ContentLength)) {
+                      $ContentLength = "???"
+                  } else {
+                      $ContentLength = "{0:#,##0}" -f $ContentLength
+                  }
+              }
+              Write-Host "INFO: $DirName/$FileName, $URL, $ContentLength, $LastModified"
+              # 資材をダウンロード
+              #Start-BitsTransfer -Source $URL -Destination "$RepoTempDirPath/$FileName"
+              Invoke-WebRequest -Uri $URL -OutFile "$RepoTempDirPath/$FileName" -UseBasicParsing
+              # ファイル更新日時を更新
+              (Get-Item "$RepoTempDirPath/$FileName").LastWriteTime = [DateTime]$LastModified
+              # ファイルサイズを取得
+              $FileSize = (Get-Item "$RepoTempDirPath/$FileName").Length
+              if (($ContentLength -eq "???") -or ($FileSize -ne [int]$ContentLength)) {
+                  Write-Host ("INFO: - Actual file size {0:#,##0}" -f $FileSize)
+              }
+          }
+          # 結果を出力
+          Get-Item "$RepoTempDirPath/$FileName" | ForEach-Object { "{0}/{1},`t{2:#,##0},`t{3:yyyy-MM-dd ddd HH:mm:ss.fff}" -f $DirName, $_.Name, $_.Length, $_.LastWriteTime }
+
+      - name: Make Archive caches
+        run: |
+          cd $GITHUB_WORKSPACE/${{ secrets.ACTION_EXEC_REPO_NAME }}/Temp1
+          /opt/7z a "../Assets.7z" -t7z -m0=lizard -mx49 -p${{ secrets.ARCHIVE_PASSWORD }} -mhe=on "*.*" -R -x!".git" -x!".github" -x!".gitignore" -x!"Assets.7z"
+
+      - name: Create Release
+        run: |
+          cd $GITHUB_WORKSPACE/${{ secrets.ACTION_EXEC_REPO_NAME }}
+          gh release create ${{ vars.DEVELOP_BRANCH_NAME }} -R ${{ github.repository_owner }}/init-dev-env-secret --title "In Development (Draft)" --notes "In development. (Draft)" --prerelease --latest=false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+
+      - name: Upload Release Asset
+        run: |
+          cd $GITHUB_WORKSPACE/${{ secrets.ACTION_EXEC_REPO_NAME }}
+          gh release upload ${{ vars.DEVELOP_BRANCH_NAME }} "Assets.7z" --clobber -R ${{ github.repository_owner }}/init-dev-env-secret
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+
+      - name: Job summaries
+        uses: actions/github-script@v9
+        with:
+          script: |
+            await core.summary
+              .addHeading("Packaging📦Workflow was done☀", 3)
+            .write()
+            await core.notice("Silently Success☀")
+
+
+
+
